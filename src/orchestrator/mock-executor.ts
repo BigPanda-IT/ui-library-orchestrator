@@ -3,7 +3,7 @@ import type { Executor } from "./types";
 // Заглушка проверяет каркас. Она не анализирует запрос и не читает библиотеку.
 export const mockExecutor: Executor = async (_task) => ({
   mode: "mock",
-  answer: "Демонстрационный ответ шага 2: Button может показывать загрузку через loading. "
+  answer: "Демонстрационный ответ: Button может показывать загрузку через loading. "
     + "Это заранее подготовленный пример, одинаковый для любого запроса.",
   example: '<Button loading={isSaving} onClick={saveDocument}>\n  Сохранить\n</Button>',
   warnings: [

@@ -5,7 +5,7 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.length === 1 && ["--help", "-h"].includes(args[0])) {
     console.log('Запуск: npm run orchestrate -- "Текст задачи"');
-    console.log("Шаг 2: исполнитель возвращает одинаковый демонстрационный ответ.");
+    console.log("Демонстрационный режим: исполнитель возвращает одинаковый подготовленный ответ.");
     return;
   }
   if (args.length !== 1 || !args[0].trim()) {

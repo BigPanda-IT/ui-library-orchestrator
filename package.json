@@ -1,0 +1,19 @@
+{
+  "name": "ast-component-indexer-learning",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Учебный индексатор React-компонентов через TypeScript Compiler API",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "extract": "npm run build && node dist/scripts/extract-component-props.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "preorchestrate": "npm run build",
+    "orchestrate": "node dist/src/orchestrator/cli.js",
+    "test:orchestrator": "npm run build && node --test tests/orchestrator.test.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "npm:@typescript/typescript6@6.0.2"
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+component-index.json
+runs/
+
+# Local agent context
+/[Aa][Gg][Ee][Nn][Tt][Ss].md
+

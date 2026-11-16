@@ -9,11 +9,20 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "preorchestrate": "npm run build",
     "orchestrate": "node dist/src/orchestrator/cli.js",
-    "test:orchestrator": "npm run build && node --test tests/orchestrator.test.cjs"
+    "test:orchestrator": "npm run build && node --test tests/orchestrator.test.cjs",
+    "mcp:start": "node dist/src/mcp/cli.js",
+    "premcp:demo": "npm run build",
+    "mcp:demo": "node dist/scripts/mcp-demo.js",
+    "test:mcp": "npm run build && node --test tests/mcp.test.cjs",
+    "test": "npm run build && node --test tests/orchestrator.test.cjs tests/mcp.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "typescript": "npm:@typescript/typescript6@6.0.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "zod": "4.3.6"
   }
 }

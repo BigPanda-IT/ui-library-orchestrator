@@ -1,25 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as ts from "typescript";
+import {
+  componentMetadataSchema,
+  type ComponentMetadata,
+  type CuratedExample,
+  type PropMetadata,
+} from "../src/components/schema";
 
 type JsonValue = string | number | boolean | null;
-
-interface PropMetadata {
-  name: string;
-  type: string;
-  required: boolean;
-  allowedValues?: JsonValue[];
-  defaultValue?: JsonValue;
-  description?: string;
-  deprecated?: string | boolean;
-  declaredIn?: string;
-}
-
-interface CuratedExample {
-  title: string;
-  description?: string;
-  code: string;
-}
 
 interface CuratedComponentDocs {
   keywords: string[];
@@ -27,39 +16,6 @@ interface CuratedComponentDocs {
   whenNotToUse: string[];
   constraints: string[];
   examples: CuratedExample[];
-}
-
-interface ComponentMetadata {
-  schemaVersion: 1;
-  id: string;
-  kind: "component";
-  name: string;
-  package: {
-    name: string;
-    version: string;
-  };
-  description?: string;
-  import: {
-    style: "named";
-    name: string;
-    from: string;
-  };
-  compactSignature: string;
-  propsType: string;
-  props: PropMetadata[];
-  usage: {
-    whenToUse: string[];
-    whenNotToUse: string[];
-    constraints: string[];
-  };
-  examples: CuratedExample[];
-  keywords: string[];
-  source: {
-    exportEntry: string;
-    implementation: string;
-    propDeclarations: string[];
-    curatedDocs: string;
-  };
 }
 
 interface PackageMetadata {
@@ -252,7 +208,8 @@ const result: ComponentMetadata = {
 };
 
 const outputPath = path.join(projectRoot, "component-index.json");
-fs.writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+const validated = componentMetadataSchema.parse(result);
+fs.writeFileSync(outputPath, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
 
 console.log(`Создан ${relativePath(outputPath)}`);
 console.log(JSON.stringify(result, null, 2));

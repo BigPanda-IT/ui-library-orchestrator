@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ComponentCatalog, ComponentIndexError, searchTerms } from "../components/catalog";
-import { componentMetadataSchema } from "../components/schema";
+import { docsResultSchema, searchResultSchema } from "./contracts";
 
 const annotations = {
   readOnlyHint: true,
@@ -40,13 +40,7 @@ export function createComponentServer(indexPath: string): McpServer {
       query: z.string().trim().min(1).max(500)
         .refine(value => searchTerms(value).length > 0, "Запрос должен содержать буквы или цифры"),
     }).strict(),
-    outputSchema: z.object({
-      query: z.string(),
-      total: z.number().int().nonnegative(),
-      components: z.array(componentMetadataSchema.pick({
-        id: true, name: true, description: true, package: true, source: true,
-      })),
-    }),
+    outputSchema: searchResultSchema,
     annotations,
   }, ({ query }) => toolResult(() => catalog.search(query)));
 
@@ -54,13 +48,7 @@ export function createComponentServer(indexPath: string): McpServer {
     title: "Документация компонента",
     description: "Возвращает полный публичный API компонента: props, типы, значения по умолчанию, deprecated, правила, ограничения, примеры и пути источников. Поиск по точному имени без учёта регистра. Не генерирует и не компилирует примеры. Неизвестный компонент возвращается как found=false.",
     inputSchema: z.object({ name: z.string().trim().min(1).max(200) }).strict(),
-    outputSchema: z.object({
-      found: z.boolean(),
-      name: z.string(),
-      component: componentMetadataSchema.nullable(),
-      message: z.string(),
-      checks: z.object({ props: z.literal("not_run"), typescript: z.literal("not_run") }),
-    }),
+    outputSchema: docsResultSchema,
     annotations,
   }, ({ name }) => toolResult(() => catalog.getDocs(name)));
 

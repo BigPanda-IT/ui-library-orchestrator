@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mockExecutor } from "./mock-executor";
+import { createMcpExecutor } from "./mcp-executor";
 import { createRunStorage } from "./storage";
 import type { Executor, Run, RunEvent, TaskResult } from "./types";
 
@@ -29,7 +29,11 @@ export async function runTask(
 
   let result: TaskResult;
   try {
-    result = await (options.executor ?? mockExecutor)(run.task);
+    result = await (options.executor ?? createMcpExecutor())(run.task, {
+      record: event => storage.append({
+        ...event, runId: run.runId, timestamp: new Date().toISOString(),
+      }),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     run = { ...run, status: "failed", error: message, updatedAt: new Date().toISOString() };

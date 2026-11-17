@@ -14,7 +14,7 @@
     "premcp:demo": "npm run build",
     "mcp:demo": "node dist/scripts/mcp-demo.js",
     "test:mcp": "npm run build && node --test tests/mcp.test.cjs",
-    "test": "npm run build && node --test tests/orchestrator.test.cjs tests/mcp.test.cjs"
+    "test": "npm run build && node --test --test-concurrency=1 tests/orchestrator.test.cjs tests/mcp.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

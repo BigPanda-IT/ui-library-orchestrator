@@ -53,8 +53,6 @@ function fromDocumentation(component: ComponentMetadata): TaskResult {
       ...component.usage.constraints,
       ...component.props.filter(prop => prop.deprecated).map(prop =>
         `${prop.name} устарел${typeof prop.deprecated === "string" ? `: ${prop.deprecated}` : "."}`),
-      "Примеры взяты из документации без адаптации к запросу; их проверки не запускались.",
-      "Импорт компонента и значения переменных в примерах предоставляет приложение.",
     ],
     checks: { props: "not_run", typescript: "not_run" },
   };

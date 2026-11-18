@@ -7,6 +7,8 @@ const { spawnSync } = require("node:child_process");
 const { runTask } = require("../dist/src/orchestrator/run-task.js");
 const { mockExecutor } = require("../dist/src/orchestrator/mock-executor.js");
 const { createMcpExecutor } = require("../dist/src/orchestrator/mcp-executor.js");
+const { saveExampleArtifact } = require("../dist/src/orchestrator/example-artifact.js");
+const { validateExample } = require("../dist/src/orchestrator/validate-example.js");
 
 async function temporaryDirectory(t) {
   const root = await mkdtemp(join(tmpdir(), "orchestrator-test-"));
@@ -91,7 +93,7 @@ test("CLI: справка успешна, отсутствие задачи и �
   }
 });
 
-test("оркестратор → MCP: реальные данные, отсутствие совпадений, ошибки и журнал", { timeout: 30000 }, async t => {
+test("оркестратор → MCP: реальные данные, отсутствие совпадений, ошибки и журнал", { timeout: 60000 }, async t => {
   const root = await temporaryDirectory(t);
   const projectRoot = join(__dirname, "..");
   const extraction = spawnSync(process.execPath, [join(projectRoot, "dist/scripts/extract-component-props.js")], {
@@ -116,14 +118,17 @@ test("оркестратор → MCP: реальные данные, отсут�
   assert.match(success.run.result.answer, /2\.4\.6/);
   assert.match(success.run.result.answer, /Описание из тестового индекса/);
   assert.match(success.run.result.answer, /src\/ui\/Button.types.ts/);
-  assert.match(success.run.result.example, /<Button>Из индекса<\/Button>/);
-  assert.deepEqual(success.run.result.checks, { props: "not_run", typescript: "not_run" });
+  assert.equal(success.run.result.component.examples[0].code, "<Button>Из индекса</Button>");
+  assert.match(success.run.result.example, /<Button loading=\{isSaving\} onClick=\{saveDocument\}>/);
+  assert.deepEqual(success.run.result.checks, { props: "passed", typescript: "passed" });
+  assert.equal(await readFile(success.run.result.artifacts.examplePath, "utf8"), success.run.result.example);
+  assert.deepEqual(JSON.parse(await readFile(success.run.result.artifacts.validationPath, "utf8")), success.run.result.validation);
   assert.deepEqual(JSON.parse(await readFile(success.statePath, "utf8")), success.run);
   const journal = await events(success.eventsPath);
   assert.deepEqual(journal.map(event => event.type), [
     "run.created", "run.started", "executor.started", "mcp.connected",
     "tool.started", "tool.completed", "tool.started", "tool.completed",
-    "executor.completed", "run.completed",
+    "executor.completed", "preparation.started", "example.saved", "validation.started", "validation.completed", "workflow.stopped", "run.completed",
   ]);
   assert.deepEqual(journal.filter(event => event.type === "tool.started").map(event => [event.tool, event.arguments]), [
     ["searchComponents", { query: "кнопка сохранения" }], ["getComponentDocs", { name: "Button" }],
@@ -135,10 +140,23 @@ test("оркестратор → MCP: реальные данные, отсут�
   assert.equal(absent.run.result.outcome, "not_found");
   assert.equal(absent.run.result.component, null);
   assert.equal(absent.run.result.example, "");
+  assert.equal(absent.run.result.artifacts, undefined);
+  assert.deepEqual(absent.run.result.checks, { props: "not_run", typescript: "not_run" });
   assert.match(absent.run.result.answer, /совпадений.*нет/);
   const absentJournal = await events(absent.eventsPath);
   assert.equal(absentJournal.filter(event => event.type === "tool.started").length, 1);
   assert.equal(absentJournal.find(event => event.type === "tool.completed").outcome, "not_found");
+
+  // Несогласованный с шаблоном API не должен давать зелёный результат.
+  const changedApi = structuredClone(expected);
+  changedApi.props = changedApi.props.filter(prop => prop.name !== "loading");
+  await writeFile(indexPath, JSON.stringify(changedApi), "utf8");
+  const rejected = await runTask("Button", options);
+  assert.equal(rejected.run.status, "validation_failed");
+  assert.deepEqual(rejected.run.result.checks, { props: "failed", typescript: "passed" });
+  assert.ok(rejected.run.result.validation.issues.some(issue => issue.code === "UNKNOWN_PROP" && /loading/.test(issue.message)));
+  assert.deepEqual(JSON.parse(await readFile(rejected.statePath, "utf8")), rejected.run);
+  assert.equal((await events(rejected.eventsPath)).at(-1).type, "run.validation_failed");
 
   for (const [query, content, message] of [
     ["!!!", JSON.stringify(expected), /Input validation error/],
@@ -162,4 +180,141 @@ test("оркестратор → MCP: реальные данные, отсут�
   const defaultRun = await runTask("Button", { runsDirectory: join(root, "default-runs") });
   assert.equal(defaultRun.run.status, "completed");
   assert.deepEqual(defaultRun.run.result.component, original);
+  assert.equal(defaultRun.run.result.workflow.status, "approved");
+  assert.equal(defaultRun.run.result.workflow.attempts.length, 1);
+});
+
+test("два исполнителя: доработка, причины остановки и история", { timeout: 60000 }, async t => {
+  const { prepareExample } = require("../dist/src/orchestrator/example-preparer.js");
+  const component = JSON.parse(await readFile(join(__dirname, "../component-index.json"), "utf8"));
+  const root = await temporaryDirectory(t);
+  const executor = async () => ({ mode: "mcp", outcome: "found", component,
+    answer: "Button", example: "", warnings: [], checks: { props: "not_run", typescript: "not_run" } });
+  const seeded = transform => async input => {
+    if (input.previous) return prepareExample(input);
+    const first = await prepareExample(input);
+    return { ...first, code: transform(first.code), changes: ["Тестовый исходный вариант."] };
+  };
+  const run = workers => runTask("Button", { runsDirectory: root, executor, workers });
+
+  await t.test("isPending исправляется; обе версии и замечания сохраняются", async () => {
+    const result = await run({ preparer: seeded(code => code.replace("loading={isSaving}", "isPending={isSaving}")) });
+    assert.equal(result.run.status, "completed", result.run.error);
+    const { workflow, example } = result.run.result;
+    assert.equal(workflow.status, "approved");
+    assert.equal(workflow.attempts.length, 2);
+    const [first, second] = workflow.attempts;
+    assert.equal(first.review.status, "needs_changes");
+    assert.deepEqual(first.review.validation.checks, { props: "passed", typescript: "passed" });
+    assert.equal(second.review.status, "approved");
+    assert.match(await readFile(first.artifacts.examplePath, "utf8"), /isPending=\{isSaving\}/);
+    assert.match(await readFile(second.artifacts.examplePath, "utf8"), /loading=\{isSaving\}/);
+    assert.equal(await readFile(second.artifacts.examplePath, "utf8"), example);
+    for (const attempt of workflow.attempts) {
+      assert.deepEqual(JSON.parse(await readFile(attempt.artifacts.validationPath, "utf8")), attempt.review.validation);
+    }
+    const { historyPath, ...savedHistory } = workflow;
+    assert.deepEqual(JSON.parse(await readFile(historyPath, "utf8")), savedHistory);
+    const journal = await events(result.eventsPath);
+    assert.equal(journal.filter(event => event.type === "revision.requested").length, 1);
+    assert.match(journal.find(event => event.type === "example.saved" && event.attempt === 2).changes[0], /isPending заменён/);
+  });
+
+  for (const [name, transform, reason] of [
+    ["неизвестный prop не удаляется", code => code.replace("<Button loading", '<Button size="large" loading'), /нет однозначного/],
+    ["конфликт loading и isPending", code => code.replace("<Button loading", "<Button isPending={true} loading"), /неоднозначна/],
+  ]) await t.test(name, async () => {
+    const result = await run({ preparer: seeded(transform) });
+    assert.equal(result.run.status, "validation_failed");
+    assert.equal(result.run.result.workflow.status, "no_fix");
+    assert.match(result.run.result.workflow.reason, reason);
+    assert.equal(result.run.result.workflow.attempts.length, 1);
+  });
+
+  await t.test("повтор того же кода и ошибки останавливает цикл", async () => {
+    const first = seeded(code => code.replace("<Button loading", '<Button size="large" loading'));
+    const result = await run({ preparer: input => input.previous
+      ? Promise.resolve({ status: "prepared", code: input.previous.code, changes: [] }) : first(input) });
+    assert.equal(result.run.status, "validation_failed");
+    assert.equal(result.run.result.workflow.status, "repeated");
+    assert.equal(result.run.result.workflow.attempts.length, 2);
+  });
+
+  await t.test("не больше двух доработок; сохраняется последний вариант", async () => {
+    let calls = 0;
+    const first = seeded(code => code.replace("<Button loading", '<Button size="large" loading'));
+    const result = await run({ preparer: async input => {
+      calls++;
+      return input.previous ? { status: "prepared", code: input.previous.code + `\n// попытка ${calls}`, changes: ["Добавлен комментарий."] }
+        : first(input);
+    } });
+    assert.equal(calls, 3);
+    assert.equal(result.run.status, "validation_failed");
+    assert.equal(result.run.result.workflow.status, "limit_reached");
+    assert.equal(result.run.result.workflow.attempts.length, 3);
+    assert.match(result.run.result.example, /попытка 3/);
+  });
+
+  await t.test("ошибка проверяющего сохраняет подготовленный код и причину", async () => {
+    const result = await run({ reviewer: async () => { throw new Error("Проверяющий недоступен"); } });
+    assert.equal(result.run.status, "failed");
+    assert.match(result.run.error, /Проверяющий недоступен/);
+    const history = JSON.parse(await readFile(result.run.historyPath, "utf8"));
+    assert.equal(history.status, "technical_error");
+    assert.equal(history.attempts.length, 1);
+    assert.equal(history.attempts[0].review, undefined);
+    assert.match(await readFile(history.attempts[0].artifacts.examplePath, "utf8"), /SaveButtonExample/);
+  });
+
+  await t.test("ошибка подготовщика при доработке не теряет первую проверку", async () => {
+    const first = seeded(code => code.replace("loading={isSaving}", "isPending={isSaving}"));
+    const result = await run({ preparer: async input => {
+      if (input.previous) throw new Error("Доработка недоступна");
+      return first(input);
+    } });
+    assert.equal(result.run.status, "failed");
+    const history = JSON.parse(await readFile(result.run.historyPath, "utf8"));
+    assert.equal(history.status, "technical_error");
+    assert.equal(history.attempts[0].review.status, "needs_changes");
+  });
+});
+
+test("проверка артефакта: реальные типы, обязательные, неизвестные и устаревшие props", { timeout: 60000 }, async t => {
+  const root = await temporaryDirectory(t);
+  const component = JSON.parse(await readFile(join(__dirname, "../component-index.json"), "utf8"));
+  const { example, artifacts } = await saveExampleArtifact(root);
+  const check = () => validateExample(artifacts.examplePath, artifacts.tsconfigPath, component);
+  assert.deepEqual(check(), { checks: { props: "passed", typescript: "passed" }, issues: [] });
+
+  const cases = [
+    ["неизвестный prop", example.replace("<Button loading", '<Button size="large" loading'), "failed", "failed", "UNKNOWN_PROP"],
+    ["нет children", example.replace(">Сохранить</Button>", " />"), "failed", "failed", "MISSING_REQUIRED_PROP"],
+    ["неверный тип", example.replace("loading={isSaving}", 'loading="yes"'), "passed", "failed", "TS2322"],
+    ["неверный вариант", example.replace("<Button loading", '<Button variant="large" loading'), "passed", "failed", "TS2322"],
+    ["неизвестный обработчик", example.replace("onClick={saveDocument}", "onClick={missingHandler}"), "passed", "failed", "TS2304"],
+    ["устаревший prop", example.replace("<Button loading", "<Button isPending={true} loading"), "passed", "passed", "DEPRECATED_PROP"],
+    ["JSX spread", example.replace("<Button loading", "<Button {...{ disabled: true }} loading"), "failed", "passed", "UNSUPPORTED_SPREAD"],
+    ["пустой children", example.replace(">Сохранить</Button>", ">{/* только комментарий */}</Button>"), "failed", "failed", "MISSING_REQUIRED_PROP"],
+    ["нет компонента", 'export const example = "Button";', "failed", "passed", "COMPONENT_NOT_USED"],
+    ["ошибка синтаксиса", example + "\nconst broken = ;", "failed", "failed", "INVALID_TSX"],
+  ];
+  for (const [name, code, props, typescript, diagnostic] of cases) {
+    await t.test(name, async () => {
+      await writeFile(artifacts.examplePath, code, "utf8");
+      const validation = check();
+      assert.deepEqual(validation.checks, { props, typescript });
+      const issue = validation.issues.find(item => item.code === diagnostic);
+      assert.ok(issue, JSON.stringify(validation));
+      assert.ok(issue.line > 0 && issue.column > 0);
+      if (diagnostic === "DEPRECATED_PROP") assert.equal(issue.severity, "warning");
+    });
+  }
+  await writeFile(artifacts.examplePath, example, "utf8");
+  // Сохранённая конфигурация должна работать также через обычный tsc.
+  const compilerPackagePath = require.resolve("typescript/package.json");
+  const compilerPackage = require(compilerPackagePath);
+  const compiler = join(dirname(compilerPackagePath), compilerPackage.bin.tsc ?? compilerPackage.bin.tsc6);
+  const valid = spawnSync(process.execPath, [compiler, "-p", artifacts.tsconfigPath], { cwd: tmpdir(), encoding: "utf8" });
+  assert.equal(valid.status, 0, valid.stdout + valid.stderr);
+  assert.ok(!(await readdir(root)).some(name => name.endsWith(".js")));
 });

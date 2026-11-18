@@ -9,6 +9,8 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "preorchestrate": "npm run build",
     "orchestrate": "node dist/src/orchestrator/cli.js",
+    "preorchestrate:demo": "npm run build",
+    "orchestrate:demo": "node dist/scripts/revision-demo.js",
     "test:orchestrator": "npm run build && node --test tests/orchestrator.test.cjs",
     "mcp:start": "node dist/src/mcp/cli.js",
     "premcp:demo": "npm run build",

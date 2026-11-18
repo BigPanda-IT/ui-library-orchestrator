@@ -1,13 +1,33 @@
 import type { ComponentMetadata } from "../components/schema";
+import type { WorkflowHistory, WorkflowEvent } from "./example-workflow-types";
+
+export interface CheckIssue {
+  check: "props" | "typescript";
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  file?: string;
+  line?: number;
+  column?: number;
+  prop?: string;
+}
+
+export interface ExampleValidation {
+  checks: { props: "passed" | "failed"; typescript: "passed" | "failed" };
+  issues: CheckIssue[];
+}
 
 interface ResultBase {
   answer: string;
   example: string;
   warnings: string[];
   checks: {
-    props: "not_run";
-    typescript: "not_run";
+    props: "not_run" | "passed" | "failed";
+    typescript: "not_run" | "passed" | "failed";
   };
+  validation?: ExampleValidation;
+  artifacts?: { examplePath: string; tsconfigPath: string; validationPath: string };
+  workflow?: WorkflowHistory & { historyPath: string };
 }
 
 export type TaskResult = ResultBase & (
@@ -26,8 +46,8 @@ interface RunBase {
 // Завершённый запуск обязательно содержит результат, ошибочный — причину.
 export type Run = RunBase & (
   | { status: "queued" | "running" }
-  | { status: "completed"; result: TaskResult }
-  | { status: "failed"; error: string }
+  | { status: "completed" | "validation_failed"; result: TaskResult }
+  | { status: "failed"; error: string; historyPath?: string }
 );
 
 export interface ExecutorEvent {
@@ -43,11 +63,16 @@ export interface RunEvent {
   timestamp: string;
   type: "run.created" | "run.started" | "executor.started"
     | "executor.completed" | "executor.failed" | "run.completed" | "run.failed"
+    | "example.saved" | "validation.started" | "validation.completed" | "validation.failed"
+    | "run.validation_failed"
+    | WorkflowEvent["type"]
     | ExecutorEvent["type"];
   message: string;
   tool?: ExecutorEvent["tool"];
   arguments?: Record<string, string>;
   outcome?: ExecutorEvent["outcome"];
+  attempt?: number;
+  changes?: string[];
 }
 
 export interface ExecutorContext {

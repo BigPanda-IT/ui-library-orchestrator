@@ -22,11 +22,26 @@ async function main(): Promise<void> {
 
   if (run.status === "failed") {
     console.error(`Ошибка исполнителя: ${run.error}`);
+    if (run.historyPath) console.log(`История попыток: ${run.historyPath}`);
     process.exitCode = 1;
-  } else if (run.status === "completed") {
+  } else if (run.status === "completed" || run.status === "validation_failed") {
     console.log(`\n${run.result.answer}\n\n${run.result.example}`);
     for (const warning of run.result.warnings) console.log(`Примечание: ${warning}`);
     console.log(`Проверки примера: props=${run.result.checks.props}, typescript=${run.result.checks.typescript}`);
+    if (run.result.workflow) {
+      const workflow = run.result.workflow;
+      console.log(`Попыток: ${workflow.attempts.length}; итог проверки: ${workflow.status}.`);
+      console.log(`Причина завершения: ${workflow.reason}\nИстория попыток: ${workflow.historyPath}`);
+    }
+    if (run.result.artifacts) {
+      console.log(`Пример: ${run.result.artifacts.examplePath}\nДиагностика: ${run.result.artifacts.validationPath}`);
+      console.log(`Повторная проверка типов: npx tsc -p "${run.result.artifacts.tsconfigPath}"`);
+    }
+    for (const issue of run.result.validation?.issues ?? []) {
+      const location = issue.file ? `${issue.file}:${issue.line ?? 1}:${issue.column ?? 1}: ` : "";
+      console.log(`${location}${issue.severity} ${issue.code}: ${issue.message}`);
+    }
+    if (run.status === "validation_failed") process.exitCode = 1;
   }
 }
 

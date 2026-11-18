@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { supportsExample } from "./example-artifact";
+import { ExampleWorkflowError, runExampleWorkflow } from "./example-workflow";
+import type { ExampleWorkers } from "./example-workflow-types";
 import { createMcpExecutor } from "./mcp-executor";
 import { createRunStorage } from "./storage";
 import type { Executor, Run, RunEvent, TaskResult } from "./types";
 
 export async function runTask(
   task: string,
-  options: { runsDirectory: string; executor?: Executor },
+  options: { runsDirectory: string; executor?: Executor; workers?: ExampleWorkers },
 ): Promise<{ run: Run; statePath: string; eventsPath: string }> {
   const normalizedTask = task.trim();
   if (!normalizedTask) throw new Error("Задача не должна быть пустой.");
@@ -44,6 +47,37 @@ export async function runTask(
   }
 
   await record("executor.completed", "Результат исполнителя получен.");
+  if (result.mode === "mcp" && result.outcome === "found" && supportsExample(result.component)) {
+    try {
+      const prepared = await runExampleWorkflow({ task: run.task, component: result.component,
+        directory: storage.directory, workers: options.workers,
+        record: event => storage.append({ ...event, runId: run.runId, timestamp: new Date().toISOString() }),
+      });
+      result = {
+        ...result, ...prepared,
+        warnings: [...result.warnings,
+          "Подготовлен фиксированный сценарий сохранения для Button; он не адаптируется к смыслу запроса.",
+          "onSave передаётся приложением. Проверены локальные типы, выполнение и отображение не проверялись."],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      run = { ...run, status: "failed", error: message, updatedAt: new Date().toISOString(),
+        ...(error instanceof ExampleWorkflowError ? { historyPath: error.historyPath } : {}) };
+      await storage.save(run);
+      await record("validation.failed", message);
+      await record("run.failed", "Не удалось подготовить или проверить пример.");
+      return { run, statePath: storage.statePath, eventsPath: storage.eventsPath };
+    }
+  } else if (result.mode === "mcp" && result.outcome === "found") {
+    result.warnings.push("Для этого компонента нет локального шаблона; примеры документации не проверялись.");
+  }
+  if (result.workflow && result.workflow.status !== "approved"
+    || result.checks.props === "failed" || result.checks.typescript === "failed") {
+    run = { ...run, status: "validation_failed", result, updatedAt: new Date().toISOString() };
+    await storage.save(run);
+    await record("run.validation_failed", result.workflow?.reason ?? "Пример сохранён, но содержит ошибки проверки.");
+    return { run, statePath: storage.statePath, eventsPath: storage.eventsPath };
+  }
   run = { ...run, status: "completed", result, updatedAt: new Date().toISOString() };
   await storage.save(run);
   await record("run.completed", "Запуск завершён.");

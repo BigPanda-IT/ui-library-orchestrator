@@ -36,7 +36,7 @@ test("сохраняет результат и последовательнос�
   assert.deepEqual(saved.result.checks, { props: "not_run", typescript: "not_run" });
   const journal = await events(first.eventsPath);
   assert.deepEqual(journal.map(event => event.type), [
-    "run.created", "run.started", "executor.started", "executor.completed", "run.completed",
+    "run.created", "run.started", "route.selected", "executor.started", "executor.completed", "run.completed",
   ]);
   assert.ok(journal.every(event => event.runId === saved.runId && !Number.isNaN(Date.parse(event.timestamp))));
   const second = await runTask("Другой запрос", { runsDirectory, executor: mockExecutor });
@@ -59,7 +59,7 @@ test("ошибка исполнителя сохраняется как failed �
   assert.equal(saved.error, "Тестовая ошибка исполнителя");
   assert.equal(saved.result, undefined);
   assert.deepEqual((await events(outcome.eventsPath)).map(event => event.type), [
-    "run.created", "run.started", "executor.started", "executor.failed", "run.failed",
+    "run.created", "run.started", "route.selected", "executor.started", "executor.failed", "run.failed",
   ]);
 });
 
@@ -86,7 +86,7 @@ test("CLI: справка успешна, отсутствие задачи и �
   const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
   assert.equal(help.status, 0);
   assert.match(help.stdout, /npm run orchestrate/);
-  for (const args of [[], ["   "], ["один", "два"]]) {
+  for (const args of [[], ["   "], ["один", "два"], ["--docs"], ["--unknown", "Button"], ["--example", "--docs"], ["--docs", "Button", "extra"]]) {
     const invalid = spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
     assert.equal(invalid.status, 1);
     assert.match(invalid.stderr, /одну непустую задачу/);
@@ -126,7 +126,7 @@ test("оркестратор → MCP: реальные данные, отсут�
   assert.deepEqual(JSON.parse(await readFile(success.statePath, "utf8")), success.run);
   const journal = await events(success.eventsPath);
   assert.deepEqual(journal.map(event => event.type), [
-    "run.created", "run.started", "executor.started", "mcp.connected",
+    "run.created", "run.started", "route.selected", "executor.started", "mcp.connected",
     "tool.started", "tool.completed", "tool.started", "tool.completed",
     "executor.completed", "preparation.started", "example.saved", "validation.started", "validation.completed", "workflow.stopped", "run.completed",
   ]);
@@ -134,6 +134,24 @@ test("оркестратор → MCP: реальные данные, отсут�
     ["searchComponents", { query: "кнопка сохранения" }], ["getComponentDocs", { name: "Button" }],
   ]);
   assert.ok(journal.every(event => event.runId === success.run.runId));
+
+  const docsOnly = await runTask("Button", { ...options, route: "docs", workers: {
+    preparer: async () => { throw new Error("Подготовщик не должен вызываться"); },
+    reviewer: async () => { throw new Error("Проверяющий не должен вызываться"); },
+  } });
+  assert.equal(docsOnly.run.status, "completed");
+  assert.equal(docsOnly.run.route, "docs");
+  assert.match(docsOnly.run.result.answer, /Props:/);
+  assert.equal(docsOnly.run.result.example, "");
+  assert.equal(docsOnly.run.result.artifacts, undefined);
+  assert.deepEqual(docsOnly.run.result.checks, { props: "not_run", typescript: "not_run" });
+  const docsEvents = await events(docsOnly.eventsPath);
+  assert.equal(docsEvents.find(event => event.type === "route.selected").message, "Выбран маршрут docs.");
+  assert.equal(docsEvents.filter(event => event.type === "tool.started").length, 2);
+  assert.ok(!docsEvents.some(event => event.type === "preparation.started"));
+  assert.deepEqual((await readdir(dirname(docsOnly.statePath))).sort(), ["events.jsonl", "run.json"]);
+
+  await assert.rejects(runTask("Button", { ...options, route: "unknown" }), /Неизвестный маршрут/);
 
   const absent = await runTask("DatePicker", options);
   assert.equal(absent.run.status, "completed");

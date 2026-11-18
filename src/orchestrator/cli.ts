@@ -1,23 +1,32 @@
 import { resolve } from "node:path";
 import { runTask } from "./run-task";
+import type { TaskRoute } from "./types";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.length === 1 && ["--help", "-h"].includes(args[0])) {
     console.log('Запуск: npm run orchestrate -- "кнопка сохранения"');
+    console.log('Режимы: --docs "Button" (API) или --example "Button" (пример и проверка).');
     console.log('MCP без модели: короткий поисковый запрос или имя, например "Button".');
     console.log("Перед первым запуском подготовьте индекс: npm run extract.");
     return;
   }
-  if (args.length !== 1 || !args[0].trim()) {
-    throw new Error('Передайте одну непустую задачу в кавычках: npm run orchestrate -- "Текст задачи"');
+  let route: TaskRoute = "example";
+  let query: string;
+  if (args.length === 1 && !args[0].startsWith("--")) query = args[0];
+  else if (args.length === 2 && (args[0] === "--docs" || args[0] === "--example")) {
+    route = args[0] === "--docs" ? "docs" : "example";
+    query = args[1];
+  } else {
+    throw new Error('Передайте одну непустую задачу в кавычках, с --docs или --example при необходимости.');
   }
+  if (!query.trim() || query.startsWith("--")) throw new Error('Передайте одну непустую задачу в кавычках.');
 
   console.log("Режим: MCP — поиск и документация из локального индекса, без модели.");
   // От compiled dist/src/orchestrator идём к корню проекта, независимо от cwd.
   const runsDirectory = resolve(__dirname, "../../../runs");
-  const { run, statePath, eventsPath } = await runTask(args[0], { runsDirectory });
-  console.log(`Run ID: ${run.runId}\nЗадача: ${run.task}\nСтатус: ${run.status}`);
+  const { run, statePath, eventsPath } = await runTask(query, { runsDirectory, route });
+  console.log(`Run ID: ${run.runId}\nЗадача: ${run.task}\nМаршрут: ${run.route}\nСтатус: ${run.status}`);
   console.log(`Состояние: ${statePath}\nЖурнал: ${eventsPath}`);
 
   if (run.status === "failed") {

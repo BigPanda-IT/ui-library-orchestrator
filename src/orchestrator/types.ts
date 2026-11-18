@@ -1,6 +1,8 @@
 import type { ComponentMetadata } from "../components/schema";
 import type { WorkflowHistory, WorkflowEvent } from "./example-workflow-types";
 
+export type TaskRoute = "docs" | "example";
+
 export interface CheckIssue {
   check: "props" | "typescript";
   severity: "error" | "warning";
@@ -39,6 +41,7 @@ export type TaskResult = ResultBase & (
 interface RunBase {
   runId: string;
   task: string;
+  route: TaskRoute;
   createdAt: string;
   updatedAt: string;
 }
@@ -64,7 +67,7 @@ export interface RunEvent {
   type: "run.created" | "run.started" | "executor.started"
     | "executor.completed" | "executor.failed" | "run.completed" | "run.failed"
     | "example.saved" | "validation.started" | "validation.completed" | "validation.failed"
-    | "run.validation_failed"
+    | "run.validation_failed" | "route.selected"
     | WorkflowEvent["type"]
     | ExecutorEvent["type"];
   message: string;

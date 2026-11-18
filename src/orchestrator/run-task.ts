@@ -4,18 +4,20 @@ import { ExampleWorkflowError, runExampleWorkflow } from "./example-workflow";
 import type { ExampleWorkers } from "./example-workflow-types";
 import { createMcpExecutor } from "./mcp-executor";
 import { createRunStorage } from "./storage";
-import type { Executor, Run, RunEvent, TaskResult } from "./types";
+import type { Executor, Run, RunEvent, TaskResult, TaskRoute } from "./types";
 
 export async function runTask(
   task: string,
-  options: { runsDirectory: string; executor?: Executor; workers?: ExampleWorkers },
+  options: { runsDirectory: string; executor?: Executor; workers?: ExampleWorkers; route?: TaskRoute },
 ): Promise<{ run: Run; statePath: string; eventsPath: string }> {
   const normalizedTask = task.trim();
   if (!normalizedTask) throw new Error("Задача не должна быть пустой.");
+  const route = options.route ?? "example";
+  if (route !== "docs" && route !== "example") throw new Error("Неизвестный маршрут: используйте docs или example.");
 
   const timestamp = new Date().toISOString();
   let run: Run = {
-    runId: randomUUID(), task: normalizedTask, status: "queued",
+    runId: randomUUID(), task: normalizedTask, route, status: "queued",
     createdAt: timestamp, updatedAt: timestamp,
   };
   const storage = await createRunStorage(options.runsDirectory, run.runId);
@@ -28,6 +30,7 @@ export async function runTask(
   run = { ...run, status: "running", updatedAt: new Date().toISOString() };
   await storage.save(run);
   await record("run.started", "Запуск начат.");
+  await record("route.selected", `Выбран маршрут ${route}.`);
   await record("executor.started", "Исполнитель запущен.");
 
   let result: TaskResult;
@@ -47,7 +50,9 @@ export async function runTask(
   }
 
   await record("executor.completed", "Результат исполнителя получен.");
-  if (result.mode === "mcp" && result.outcome === "found" && supportsExample(result.component)) {
+  if (route === "docs" && result.mode === "mcp" && result.outcome === "found") {
+    result = { ...result, example: "" };
+  } else if (route === "example" && result.mode === "mcp" && result.outcome === "found" && supportsExample(result.component)) {
     try {
       const prepared = await runExampleWorkflow({ task: run.task, component: result.component,
         directory: storage.directory, workers: options.workers,
@@ -68,7 +73,7 @@ export async function runTask(
       await record("run.failed", "Не удалось подготовить или проверить пример.");
       return { run, statePath: storage.statePath, eventsPath: storage.eventsPath };
     }
-  } else if (result.mode === "mcp" && result.outcome === "found") {
+  } else if (route === "example" && result.mode === "mcp" && result.outcome === "found") {
     result.warnings.push("Для этого компонента нет локального шаблона; примеры документации не проверялись.");
   }
   if (result.workflow && result.workflow.status !== "approved"
